@@ -1,0 +1,31 @@
+name: 'GitHub Organization Member Email Action'
+description: 'Generate a report retrieving all member email addresses where possible belonging to a GitHub organization.'
+
+inputs:
+  token:
+    description: 'A Personal Access token with admin:org, read:user, repo, user:email scopes'
+    required: true
+  org:
+    description: 'GitHub organization to retrieve data from'
+    default: ''
+    required: false
+  single-report:
+    description: 'Set default to value TRUE to generate an additional report per workflow run'
+    default: ''
+    required: false
+  committer-name:
+    description: 'The name of the committer that will appear in the Git history'
+    default: 'github-actions'
+    required: false
+  committer-email:
+    description: 'The committer email that will appear in the Git history'
+    default: 'github-actions@github.com'
+    required: false
+
+runs:
+  using: 'node12'
+  main: 'dist/index.js'
+
+branding:
+  icon: file-text
+  color: green

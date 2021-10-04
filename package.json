@@ -1,0 +1,32 @@
+{
+  "name": "github-org-member-email-action",
+  "version": "1.0.0",
+  "description": "A GitHub Action to generate a report retrieving all member email addresses where possible belonging to a GitHub organization.",
+  "author": {
+    "name": "GitHub Professional Services",
+    "email": "services@github.com",
+    "url": "https://services.github.com"
+  },
+  "contributors": [
+    {
+      "name": "Nick Nagel",
+      "email": "nicklegan@github.com",
+      "url": "https://github.com/stoe"
+    }
+  ],
+  "license": "MIT",
+  "repository": "github:nicklegan/github-org-member-email-action",
+  "engines": {
+    "node": ">=14",
+    "npm": ">=7"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "npx @vercel/ncc build index.js --out dist --license licenses.txt --quiet --minify"
+  },
+  "dependencies": {
+    "@actions/core": "^1.6.0",
+    "@octokit/rest": "^18.11.4",
+    "csv-stringify": "^5.6.5"
+  }
+}
