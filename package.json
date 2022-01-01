@@ -27,6 +27,6 @@
   "dependencies": {
     "@actions/core": "^1.6.0",
     "@octokit/rest": "^18.11.4",
-    "csv-stringify": "^5.6.5"
+    "csv-stringify": "^6.0.5"
   }
 }
