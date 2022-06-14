@@ -1,9 +1,9 @@
 {
-  "name": "github-org-member-email-action",
-  "version": "1.0.0",
-  "description": "A GitHub Action to generate a report retrieving all member email addresses where possible belonging to a GitHub organization.",
+  "name": "github-org-member-email-report-action",
+  "version": "2.0.0",
+  "description": "A GitHub Action to generate a report retrieving member email addresses from a GitHub cloud organization where possible.",
   "author": {
-    "name": "GitHub Professional Services",
+    "name": "GitHub Expert Services",
     "email": "services@github.com",
     "url": "https://services.github.com"
   },
@@ -11,13 +11,13 @@
     {
       "name": "Nick Nagel",
       "email": "nicklegan@github.com",
-      "url": "https://github.com/stoe"
+      "url": "https://github.com/nicklegan"
     }
   ],
   "license": "MIT",
   "repository": "github:nicklegan/github-org-member-email-action",
   "engines": {
-    "node": ">=14",
+    "node": ">=16",
     "npm": ">=7"
   },
   "main": "index.js",
@@ -25,8 +25,10 @@
     "build": "npx @vercel/ncc build index.js --out dist --license licenses.txt --quiet --minify"
   },
   "dependencies": {
-    "@actions/core": "^1.6.0",
-    "@octokit/rest": "^18.11.4",
-    "csv-stringify": "^5.6.5"
+    "@actions/core": "^1.8.2",
+    "@actions/github": "^5.0.3",
+    "@octokit/auth-app": "^3.6.1",
+    "csv": "^6.1.0",
+    "natural-orderby": "^2.0.3"
   }
 }
