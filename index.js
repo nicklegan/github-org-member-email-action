@@ -1,27 +1,93 @@
 const core = require('@actions/core')
-const stringify = require('csv-stringify/lib/sync')
-const {Octokit} = require('@octokit/rest')
-const token = core.getInput('token', {required: true})
-const octokit = new Octokit({auth: token})
-
+const github = require('@actions/github')
+const { GitHub } = require('@actions/github/lib/utils')
+const { createAppAuth } = require('@octokit/auth-app')
+const { stringify } = require('csv-stringify/sync')
+const { orderBy } = require('natural-orderby')
+const token = core.getInput('token', { required: false })
 const eventPayload = require(process.env.GITHUB_EVENT_PATH)
-const org = core.getInput('org', {required: false}) || eventPayload.organization.login
 const owner = eventPayload.repository.owner.login
 const repo = eventPayload.repository.name
-const committerName = core.getInput('committer-name', {required: false}) || 'github-actions'
-const committerEmail = core.getInput('committer-email', {required: false}) || 'github-actions@github.com'
-const singleReport = core.getInput('single-report', {required: false}) || ''
+
+const appId = core.getInput('appid', { required: false })
+const privateKey = core.getInput('privatekey', { required: false })
+const installationId = core.getInput('installationid', { required: false })
+
+const org = core.getInput('org', { required: false }) || eventPayload.organization.login
+const committerName = core.getInput('committer-name', { required: false }) || 'github-actions'
+const committerEmail = core.getInput('committer-email', { required: false }) || 'github-actions@github.com'
+const singleReport = core.getInput('single-report', { required: false }) || 'false'
+const sortColumn = core.getInput('sort', { required: false }) || 'userName'
+const sortOrder = core.getInput('sort-order', { required: false }) || 'asc'
+const jsonExport = core.getInput('json', { required: false }) || 'false'
+
+let octokit = null
+
+// GitHub App authentication
+if (appId && privateKey && installationId) {
+  octokit = new GitHub({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: appId,
+      privateKey: privateKey,
+      installationId: installationId
+    }
+  })
+} else {
+  octokit = github.getOctokit(token)
+}
+
+// Orchestrator
+;(async () => {
+  try {
+    const emailArray = []
+    await getSamlId(emailArray)
+    await csvReport(emailArray)
+    if (jsonExport === 'true') {
+      await jsonReport(emailArray)
+    }
+  } catch (error) {
+    core.setFailed(error.message)
+  }
+})()
+
+// Retrieve organization SSO status
+async function getSamlId(emailArray) {
+  try {
+    const query = /* GraphQL */ `
+      query ($org: String!) {
+        organization(login: $org) {
+          samlIdentityProvider {
+            id
+          }
+        }
+      }
+    `
+
+    dataJSON = await octokit.graphql({
+      query,
+      org: org
+    })
+
+    if (dataJSON.organization.samlIdentityProvider) {
+      await ssoEmail(emailArray)
+    } else {
+      await dotcomEmail(emailArray)
+    }
+  } catch (error) {
+    core.setFailed(error.message)
+  }
+}
 
 // Retrieve all members of a SSO enabled organization
 async function ssoEmail(emailArray) {
   try {
-    let paginationMember = null
-
-    const query = `query ($org: String! $cursorID: String) {
-      organization(login: $org ) {
+    let endCursor = null
+    const query = /* GraphQL */ `
+      query ($org: String!, $cursorID: String) {
+        organization(login: $org) {
           samlIdentityProvider {
-            externalIdentities(first:100 after: $cursorID) {
-              totalCount
+            externalIdentities(first: 100, after: $cursorID) {
               edges {
                 node {
                   samlIdentity {
@@ -47,25 +113,25 @@ async function ssoEmail(emailArray) {
       }
     `
 
-    let hasNextPageMember = false
+    let hasNextPage = false
     let dataJSON = null
 
     do {
       dataJSON = await octokit.graphql({
         query,
         org: org,
-        cursorID: paginationMember
+        cursorID: endCursor
       })
 
       const emails = dataJSON.organization.samlIdentityProvider.externalIdentities.edges
 
-      hasNextPageMember = dataJSON.organization.samlIdentityProvider.externalIdentities.pageInfo.hasNextPage
+      hasNextPage = dataJSON.organization.samlIdentityProvider.externalIdentities.pageInfo.hasNextPage
 
       for (const email of emails) {
-        if (hasNextPageMember) {
-          paginationMember = dataJSON.organization.samlIdentityProvider.externalIdentities.pageInfo.endCursor
+        if (hasNextPage) {
+          endCursor = dataJSON.organization.samlIdentityProvider.externalIdentities.pageInfo.endCursor
         } else {
-          paginationMember = null
+          endCursor = null
         }
 
         if (!email.node.user) continue
@@ -77,11 +143,11 @@ async function ssoEmail(emailArray) {
         const updatedAt = email.node.user.updatedAt.slice(0, 10)
         const createdAt = email.node.user.createdAt.slice(0, 10)
 
-        emailArray.push({userName, fullName, ssoEmail, publicEmail, verifiedEmail, updatedAt, createdAt})
+        emailArray.push({ userName, fullName, ssoEmail, publicEmail, verifiedEmail, updatedAt, createdAt })
 
         console.log(`${userName}`)
       }
-    } while (hasNextPageMember)
+    } while (hasNextPage)
   } catch (error) {
     core.setFailed(error.message)
   }
@@ -90,49 +156,49 @@ async function ssoEmail(emailArray) {
 // Retrieve all members of a SSO-disabled organization
 async function dotcomEmail(emailArray) {
   try {
-    let paginationMember = null
-
-    const query = `query ($org: String! $cursorID: String) {
-      organization(login: $org ) {
-        membersWithRole(first: 100, after: $cursorID) {  
-          edges {
-            node {
-              login
-              name
-              email
-              organizationVerifiedDomainEmails(login: $org)
-              updatedAt
-              createdAt
+    let endCursor = null
+    const query = /* GraphQL */ `
+      query ($org: String!, $cursorID: String) {
+        organization(login: $org) {
+          membersWithRole(first: 100, after: $cursorID) {
+            edges {
+              node {
+                login
+                name
+                email
+                organizationVerifiedDomainEmails(login: $org)
+                updatedAt
+                createdAt
+              }
             }
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
           }
         }
       }
-    }
     `
 
-    let hasNextPageMember = false
+    let hasNextPage = false
     let dataJSON = null
 
     do {
       dataJSON = await octokit.graphql({
         query,
         org: org,
-        cursorID: paginationMember
+        cursorID: endCursor
       })
 
       const emails = dataJSON.organization.membersWithRole.edges
 
-      hasNextPageMember = dataJSON.organization.membersWithRole.pageInfo.hasNextPage
+      hasNextPage = dataJSON.organization.membersWithRole.pageInfo.hasNextPage
 
       for (const email of emails) {
-        if (hasNextPageMember) {
-          paginationMember = dataJSON.organization.membersWithRole.pageInfo.endCursor
+        if (hasNextPage) {
+          endCursor = dataJSON.organization.membersWithRole.pageInfo.endCursor
         } else {
-          paginationMember = null
+          endCursor = null
         }
 
         if (!email.node.login) continue
@@ -144,38 +210,16 @@ async function dotcomEmail(emailArray) {
         const createdAt = email.node.createdAt.slice(0, 10)
 
         console.log(`${userName}`)
-        emailArray.push({userName, fullName, publicEmail, verifiedEmail, updatedAt, createdAt})
+        emailArray.push({ userName, fullName, publicEmail, verifiedEmail, updatedAt, createdAt })
       }
-    } while (hasNextPageMember)
+    } while (hasNextPage)
   } catch (error) {
     core.setFailed(error.message)
   }
 }
 
-// Retrieve organization SSO status and query the organization
-;(async () => {
+async function csvReport(emailArray) {
   try {
-    let emailArray = []
-
-    const query = `query ($org: String!) {
-        organization(login: $org ) {
-            samlIdentityProvider {
-              id
-            }
-          }
-        }
-      `
-
-    dataJSON = await octokit.graphql({
-      query,
-      org: org
-    })
-
-    if (dataJSON.organization.samlIdentityProvider) {
-      await ssoEmail(emailArray)
-    } else {
-      await dotcomEmail(emailArray)
-    }
     // Add columns to array result
     const columns = {
       userName: 'Username',
@@ -187,13 +231,17 @@ async function dotcomEmail(emailArray) {
       createdAt: 'Created'
     }
 
-    emailArray.unshift(columns)
+    // Sort array by column
+    const sortArray = orderBy(emailArray, [sortColumn], [sortOrder])
 
     // Convert array to csv
-    const csv = stringify(emailArray, {})
+    const csv = stringify(sortArray, {
+      header: true,
+      columns: columns
+    })
 
     // Prepare path/filename, set repo/org context and commit name/email/message parameters
-    const reportPath = {path: `reports/${org}-member-email-report.csv`}
+    const reportPath = { path: `reports/${org}-member-email-report.csv` }
 
     const opts = {
       owner,
@@ -208,7 +256,7 @@ async function dotcomEmail(emailArray) {
 
     // try to get the sha, if the file already exists
     try {
-      const {data} = await octokit.repos.getContent({
+      const { data } = await octokit.rest.repos.getContent({
         owner,
         repo,
         ...reportPath
@@ -217,20 +265,19 @@ async function dotcomEmail(emailArray) {
       if (data && data.sha) {
         reportPath.sha = data.sha
       }
-    } catch (error) {
-    // do nothing
-    }
+    } catch (error) {}
 
-    // push csvs to repo
-    await octokit.repos.createOrUpdateFileContents({
+    // push csv report to repo
+    await octokit.rest.repos.createOrUpdateFileContents({
       ...opts,
       ...reportPath
     })
 
-    if (singleReport === 'TRUE') {
-      const singlePath = {path: `reports/single/${org}-${new Date().toISOString().substring(0, 19) + 'Z'}.csv`}
+    // push optional single csv report to repo
+    if (singleReport === 'true') {
+      const singlePath = { path: `reports/single/${org}-${new Date().toISOString().substring(0, 19) + 'Z'}.csv` }
 
-      await octokit.repos.createOrUpdateFileContents({
+      await octokit.rest.repos.createOrUpdateFileContents({
         ...opts,
         ...singlePath
       })
@@ -238,4 +285,43 @@ async function dotcomEmail(emailArray) {
   } catch (error) {
     core.setFailed(error.message)
   }
-})()
+}
+
+// Generate an optional JSON report
+async function jsonReport(emailArray) {
+  try {
+    // Prepare path/filename, set repo/org context and commit name/email/message parameters
+    const reportPath = { path: `reports/${org}-member-email-report.json` }
+    const opts = {
+      owner,
+      repo,
+      message: `${new Date().toISOString().slice(0, 10)} Member email report`,
+      content: Buffer.from(JSON.stringify(emailArray, null, 2)).toString('base64'),
+      committer: {
+        name: committerName,
+        email: committerEmail
+      }
+    }
+
+    // try to get the sha, if the file already exists
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner,
+        repo,
+        ...reportPath
+      })
+
+      if (data && data.sha) {
+        reportPath.sha = data.sha
+      }
+    } catch (err) {}
+
+    // push json report to repo
+    await octokit.rest.repos.createOrUpdateFileContents({
+      ...opts,
+      ...reportPath
+    })
+  } catch (error) {
+    core.setFailed(error.message)
+  }
+}
